@@ -9,6 +9,9 @@ const H = 460;
 const SKIN = 0xf2c9a6;
 
 function withCanvas(scene, key, draw) {
+  if (scene.textures.exists(key)) {
+    return;
+  }
   const g = scene.add.graphics();
   draw(g);
   g.generateTexture(key, W, H);

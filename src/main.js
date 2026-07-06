@@ -6,10 +6,10 @@ const config = {
   parent: 'game-container',
   backgroundColor: '#fdf1f5',
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.EXPAND,
     autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: 900,
-    height: 640,
+    width: 1920,
+    height: 1080,
   },
   scene: [DressUpScene],
 };

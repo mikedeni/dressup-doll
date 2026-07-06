@@ -2,9 +2,10 @@ import Phaser from 'phaser';
 import { CATEGORIES, textureKey } from './../outfits.js';
 import { createDollTextures } from './../textures.js';
 
-const DOLL_X = 300;
-const DOLL_Y = 330;
-const PANEL_X = 560;
+// Layout is computed from the game size (1920x1080 base, Scale.FIT keeps
+// the 16:9 aspect on any screen). The doll textures are 260x460, so the
+// doll is scaled up to fill the left half of the frame.
+const DOLL_SCALE = 1.9;
 
 export default class DressUpScene extends Phaser.Scene {
   constructor() {
@@ -17,43 +18,58 @@ export default class DressUpScene extends Phaser.Scene {
   create() {
     createDollTextures(this);
 
+    // EXPAND mode grows the game size with the viewport; rebuild the
+    // layout whenever it changes so the scene always fills the screen.
+    this.scale.once('resize', () => this.scene.restart());
+
+    const { width, height } = this.scale;
+    this.dollX = width * 0.28;
+    this.dollY = height * 0.56;
+    this.panelX = width * 0.55;
+    this.panelWidth = width * 0.36;
+
     this.add
-      .text(450, 44, 'Dress-Up Doll', {
+      .text(width / 2, height * 0.07, 'Dress-Up Doll', {
         fontFamily: 'Georgia, serif',
-        fontSize: '40px',
+        fontSize: '64px',
         color: '#5c3a4d',
       })
       .setOrigin(0.5);
 
-    this.add.image(DOLL_X, DOLL_Y, 'doll-body');
+    this.add.image(this.dollX, this.dollY, 'doll-body').setScale(DOLL_SCALE);
+
+    const rowStart = height * 0.2;
+    const rowGap = height * 0.14;
 
     CATEGORIES.forEach((category, row) => {
       this.selection[category.key] = 0;
-      this.layers[category.key] = this.add.image(
-        DOLL_X,
-        DOLL_Y,
-        textureKey(category.key, 0),
-      );
-      this.createSelector(category, 140 + row * 90);
+      this.layers[category.key] = this.add
+        .image(this.dollX, this.dollY, textureKey(category.key, 0))
+        .setScale(DOLL_SCALE);
+      this.createSelector(category, rowStart + row * rowGap);
     });
 
-    this.createRandomizeButton(140 + CATEGORIES.length * 90);
+    this.createRandomizeButton(rowStart + CATEGORIES.length * rowGap);
   }
 
   createSelector(category, y) {
-    this.add.text(PANEL_X, y - 34, category.label, {
+    this.add.text(this.panelX, y - 52, category.label, {
       fontFamily: 'Arial, sans-serif',
-      fontSize: '18px',
+      fontSize: '28px',
       color: '#8a6478',
     });
 
-    this.createArrowButton(PANEL_X + 20, y + 10, '<', () => this.cycle(category, -1));
-    this.createArrowButton(PANEL_X + 280, y + 10, '>', () => this.cycle(category, 1));
+    this.createArrowButton(this.panelX + 32, y + 16, '<', () =>
+      this.cycle(category, -1),
+    );
+    this.createArrowButton(this.panelX + this.panelWidth - 32, y + 16, '>', () =>
+      this.cycle(category, 1),
+    );
 
     this.valueLabels[category.key] = this.add
-      .text(PANEL_X + 150, y + 10, category.variants[0].name, {
+      .text(this.panelX + this.panelWidth / 2, y + 16, category.variants[0].name, {
         fontFamily: 'Arial, sans-serif',
-        fontSize: '20px',
+        fontSize: '32px',
         color: '#3d2734',
       })
       .setOrigin(0.5);
@@ -61,12 +77,12 @@ export default class DressUpScene extends Phaser.Scene {
 
   createArrowButton(x, y, label, onClick) {
     const bg = this.add
-      .rectangle(x, y, 44, 44, 0xe8a7bf)
+      .rectangle(x, y, 64, 64, 0xe8a7bf)
       .setInteractive({ useHandCursor: true });
     this.add
       .text(x, y, label, {
         fontFamily: 'Arial, sans-serif',
-        fontSize: '24px',
+        fontSize: '36px',
         color: '#ffffff',
       })
       .setOrigin(0.5);
@@ -77,13 +93,14 @@ export default class DressUpScene extends Phaser.Scene {
   }
 
   createRandomizeButton(y) {
+    const x = this.panelX + this.panelWidth / 2;
     const bg = this.add
-      .rectangle(PANEL_X + 150, y, 220, 52, 0x8e5fd9)
+      .rectangle(x, y, 320, 76, 0x8e5fd9)
       .setInteractive({ useHandCursor: true });
     this.add
-      .text(PANEL_X + 150, y, 'Randomize!', {
+      .text(x, y, 'Randomize!', {
         fontFamily: 'Arial, sans-serif',
-        fontSize: '22px',
+        fontSize: '34px',
         color: '#ffffff',
       })
       .setOrigin(0.5);
@@ -111,7 +128,7 @@ export default class DressUpScene extends Phaser.Scene {
 
     this.tweens.add({
       targets: this.layers[category.key],
-      scale: { from: 1.06, to: 1 },
+      scale: { from: DOLL_SCALE * 1.06, to: DOLL_SCALE },
       duration: 160,
       ease: 'Back.Out',
     });
