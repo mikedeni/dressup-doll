@@ -1,30 +1,58 @@
 import Phaser from 'phaser';
 import { CATEGORIES, textureKey } from './../outfits.js';
-import { createDollTextures } from './../textures.js';
 
-// Layout is computed from the game size (1920x1080 base, Scale.FIT keeps
-// the 16:9 aspect on any screen). The doll textures are 260x460, so the
-// doll is scaled up to fill the left half of the frame.
-const DOLL_SCALE = 1.9;
+// Doll is assembled from the Kenney "Modular Characters" pack (CC0)
+// following the pack's instruction sheet. All part offsets below are in
+// asset pixels, relative to the torso centre; the whole container is
+// scaled to fit the viewport height.
+const PART_OFFSETS = {
+  neck: { x: 0, y: -95 },
+  head: { x: 0, y: -180 },
+  face: { x: 0, y: -175 },
+  hairTop: { x: 0, y: -272 }, // hair uses origin (0.5, 0) so styles of any length align at the head top
+  arm: { x: 78, y: -20 },
+  hand: { x: 125, y: 55 },
+  hip: { x: 0, y: 100 },
+  leg: { x: 36, y: 190 },
+  shoe: { x: 48, y: 282 },
+};
+const DOLL_SPAN = 575; // hair top to shoe bottom, in asset pixels
 
 export default class DressUpScene extends Phaser.Scene {
   constructor() {
     super('DressUpScene');
     this.selection = {};
-    this.layers = {};
+    this.parts = {};
     this.valueLabels = {};
   }
 
-  create() {
-    createDollTextures(this);
+  preload() {
+    this.load.setPath('assets/doll');
+    for (const key of ['head', 'neck', 'hand', 'face']) {
+      this.load.image(key, `${key}.png`);
+    }
+    CATEGORIES.forEach((category) => {
+      category.variants.forEach((variant, i) => {
+        const base = textureKey(category.key, i);
+        if (category.key === 'top') {
+          this.load.image(base, `${base}.png`);
+          this.load.image(`${base}-arm`, `${base}-arm.png`);
+        } else if (category.key === 'bottom') {
+          this.load.image(`${base}-hip`, `${base}-hip.png`);
+          this.load.image(`${base}-leg`, `${base}-leg.png`);
+        } else {
+          this.load.image(base, `${base}.png`);
+        }
+      });
+    });
+  }
 
+  create() {
     // EXPAND mode grows the game size with the viewport; rebuild the
     // layout whenever it changes so the scene always fills the screen.
     this.scale.once('resize', () => this.scene.restart());
 
     const { width, height } = this.scale;
-    this.dollX = width * 0.28;
-    this.dollY = height * 0.56;
     this.panelX = width * 0.55;
     this.panelWidth = width * 0.36;
 
@@ -36,20 +64,58 @@ export default class DressUpScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    this.add.image(this.dollX, this.dollY, 'doll-body').setScale(DOLL_SCALE);
+    this.createDoll(width * 0.28, height * 0.55, (height * 0.72) / DOLL_SPAN);
 
     const rowStart = height * 0.2;
     const rowGap = height * 0.14;
 
     CATEGORIES.forEach((category, row) => {
       this.selection[category.key] = 0;
-      this.layers[category.key] = this.add
-        .image(this.dollX, this.dollY, textureKey(category.key, 0))
-        .setScale(DOLL_SCALE);
       this.createSelector(category, rowStart + row * rowGap);
     });
 
     this.createRandomizeButton(rowStart + CATEGORIES.length * rowGap);
+  }
+
+  createDoll(x, y, scale) {
+    const P = PART_OFFSETS;
+    const img = (key, px, py) => this.add.image(px, py, key);
+
+    this.parts.neck = img('neck', P.neck.x, P.neck.y);
+    this.parts.armL = img('top-0-arm', -P.arm.x, P.arm.y).setFlipX(true);
+    this.parts.armR = img('top-0-arm', P.arm.x, P.arm.y);
+    this.parts.handL = img('hand', -P.hand.x, P.hand.y).setFlipX(true);
+    this.parts.handR = img('hand', P.hand.x, P.hand.y);
+    this.parts.legL = img('bottom-0-leg', -P.leg.x, P.leg.y).setFlipX(true);
+    this.parts.legR = img('bottom-0-leg', P.leg.x, P.leg.y);
+    this.parts.shoeL = img('shoes-0', -P.shoe.x, P.shoe.y).setFlipX(true);
+    this.parts.shoeR = img('shoes-0', P.shoe.x, P.shoe.y);
+    this.parts.hip = img('bottom-0-hip', P.hip.x, P.hip.y);
+    this.parts.torso = img('top-0', 0, 0);
+    this.parts.head = img('head', P.head.x, P.head.y);
+    this.parts.face = img('face', P.face.x, P.face.y);
+    this.parts.hair = img('hair-0', P.hairTop.x, P.hairTop.y).setOrigin(0.5, 0);
+
+    this.doll = this.add.container(x, y, Object.values(this.parts)).setScale(scale);
+    this.dollScale = scale;
+  }
+
+  applyVariant(categoryKey, index) {
+    const base = textureKey(categoryKey, index);
+    if (categoryKey === 'hair') {
+      this.parts.hair.setTexture(base);
+    } else if (categoryKey === 'top') {
+      this.parts.torso.setTexture(base);
+      this.parts.armL.setTexture(`${base}-arm`);
+      this.parts.armR.setTexture(`${base}-arm`);
+    } else if (categoryKey === 'bottom') {
+      this.parts.hip.setTexture(`${base}-hip`);
+      this.parts.legL.setTexture(`${base}-leg`);
+      this.parts.legR.setTexture(`${base}-leg`);
+    } else if (categoryKey === 'shoes') {
+      this.parts.shoeL.setTexture(base);
+      this.parts.shoeR.setTexture(base);
+    }
   }
 
   createSelector(category, y) {
@@ -59,9 +125,7 @@ export default class DressUpScene extends Phaser.Scene {
       color: '#8a6478',
     });
 
-    this.createArrowButton(this.panelX + 32, y + 16, '<', () =>
-      this.cycle(category, -1),
-    );
+    this.createArrowButton(this.panelX + 32, y + 16, '<', () => this.cycle(category, -1));
     this.createArrowButton(this.panelX + this.panelWidth - 32, y + 16, '>', () =>
       this.cycle(category, 1),
     );
@@ -123,12 +187,12 @@ export default class DressUpScene extends Phaser.Scene {
 
   setVariant(category, index) {
     this.selection[category.key] = index;
-    this.layers[category.key].setTexture(textureKey(category.key, index));
+    this.applyVariant(category.key, index);
     this.valueLabels[category.key].setText(category.variants[index].name);
 
     this.tweens.add({
-      targets: this.layers[category.key],
-      scale: { from: DOLL_SCALE * 1.06, to: DOLL_SCALE },
+      targets: this.doll,
+      scale: { from: this.dollScale * 1.04, to: this.dollScale },
       duration: 160,
       ease: 'Back.Out',
     });
