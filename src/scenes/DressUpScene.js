@@ -77,6 +77,24 @@ export default class DressUpScene extends Phaser.Scene {
     });
 
     this.createRandomizeButton(rowStart + CATEGORIES.length * rowGap);
+    this.createRoomButton();
+  }
+
+  createRoomButton() {
+    const bg = this.add
+      .rectangle(140, 52, 220, 60, 0x8e5fd9)
+      .setInteractive({ useHandCursor: true });
+    this.add
+      .text(140, 52, 'My Room >', {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '28px',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+
+    bg.on('pointerover', () => bg.setFillStyle(0x7247b8));
+    bg.on('pointerout', () => bg.setFillStyle(0x8e5fd9));
+    bg.on('pointerdown', () => this.scene.start('RoomScene'));
   }
 
   createDoll(x, y, scale) {
