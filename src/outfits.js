@@ -7,11 +7,21 @@ export const CATEGORIES = [
     key: 'hair',
     label: 'Hair',
     variants: [
-      { name: 'Messy Brown' },
+      { name: 'Messy Brown', offsetX: 10 },
       { name: 'Long Blonde' },
       { name: 'Long Black' },
       { name: 'Short Red' },
       { name: 'Wavy Brown' },
+    ],
+  },
+  {
+    key: 'face',
+    label: 'Face',
+    variants: [
+      { name: 'Happy' },
+      { name: 'Cheeky' },
+      { name: 'Calm' },
+      { name: 'Smiley' },
     ],
   },
   {

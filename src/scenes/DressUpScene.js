@@ -6,12 +6,13 @@ import { CATEGORIES, textureKey } from './../outfits.js';
 // asset pixels, relative to the torso centre; the whole container is
 // scaled to fit the viewport height.
 const PART_OFFSETS = {
-  neck: { x: 0, y: -95 },
+  neck: { x: 0, y: -76 },
+  torso: { x: 0, y: 15 },
   head: { x: 0, y: -180 },
-  face: { x: 0, y: -175 },
+  face: { x: 0, y: -226 },
   hairTop: { x: 0, y: -272 }, // hair uses origin (0.5, 0) so styles of any length align at the head top
-  arm: { x: 78, y: -20 },
-  hand: { x: 125, y: 55 },
+  arm: { x: 78, y: -5 },
+  hand: { x: 125, y: 70 },
   hip: { x: 0, y: 100 },
   leg: { x: 36, y: 190 },
   shoe: { x: 48, y: 282 },
@@ -28,7 +29,7 @@ export default class DressUpScene extends Phaser.Scene {
 
   preload() {
     this.load.setPath('assets/doll');
-    for (const key of ['head', 'neck', 'hand', 'face']) {
+    for (const key of ['head', 'neck', 'hand']) {
       this.load.image(key, `${key}.png`);
     }
     CATEGORIES.forEach((category) => {
@@ -66,11 +67,12 @@ export default class DressUpScene extends Phaser.Scene {
 
     this.createDoll(width * 0.28, height * 0.55, (height * 0.72) / DOLL_SPAN);
 
-    const rowStart = height * 0.2;
-    const rowGap = height * 0.14;
+    const rowStart = height * 0.18;
+    const rowGap = height * 0.125;
 
     CATEGORIES.forEach((category, row) => {
       this.selection[category.key] = 0;
+      this.applyVariant(category, 0);
       this.createSelector(category, rowStart + row * rowGap);
     });
 
@@ -91,19 +93,26 @@ export default class DressUpScene extends Phaser.Scene {
     this.parts.shoeL = img('shoes-0', -P.shoe.x, P.shoe.y).setFlipX(true);
     this.parts.shoeR = img('shoes-0', P.shoe.x, P.shoe.y);
     this.parts.hip = img('bottom-0-hip', P.hip.x, P.hip.y);
-    this.parts.torso = img('top-0', 0, 0);
+    this.parts.torso = img('top-0', P.torso.x, P.torso.y);
     this.parts.head = img('head', P.head.x, P.head.y);
-    this.parts.face = img('face', P.face.x, P.face.y);
+    // Faces vary in height, so anchor them at the eyebrow line (origin top)
+    this.parts.face = img('face-0', P.face.x, P.face.y).setOrigin(0.5, 0);
     this.parts.hair = img('hair-0', P.hairTop.x, P.hairTop.y).setOrigin(0.5, 0);
 
     this.doll = this.add.container(x, y, Object.values(this.parts)).setScale(scale);
     this.dollScale = scale;
   }
 
-  applyVariant(categoryKey, index) {
+  applyVariant(category, index) {
+    const categoryKey = category.key;
+    const variant = category.variants[index];
     const base = textureKey(categoryKey, index);
     if (categoryKey === 'hair') {
       this.parts.hair.setTexture(base);
+      // Some hair assets are drawn off-centre; nudge per variant.
+      this.parts.hair.x = PART_OFFSETS.hairTop.x + (variant.offsetX ?? 0);
+    } else if (categoryKey === 'face') {
+      this.parts.face.setTexture(base);
     } else if (categoryKey === 'top') {
       this.parts.torso.setTexture(base);
       this.parts.armL.setTexture(`${base}-arm`);
@@ -187,7 +196,7 @@ export default class DressUpScene extends Phaser.Scene {
 
   setVariant(category, index) {
     this.selection[category.key] = index;
-    this.applyVariant(category.key, index);
+    this.applyVariant(category, index);
     this.valueLabels[category.key].setText(category.variants[index].name);
 
     this.tweens.add({
