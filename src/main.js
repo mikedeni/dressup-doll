@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
-import DressUpScene from './scenes/DressUpScene.js';
-import RoomScene from './scenes/RoomScene.js';
+import GameScene from './scenes/GameScene.js';
 
 const config = {
   type: Phaser.AUTO,
@@ -12,7 +11,7 @@ const config = {
     width: 1920,
     height: 1080,
   },
-  scene: [DressUpScene, RoomScene],
+  scene: [GameScene],
 };
 
 new Phaser.Game(config);
