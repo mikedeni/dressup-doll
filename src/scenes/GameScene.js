@@ -74,6 +74,8 @@ export default class GameScene extends Phaser.Scene {
     });
     this.load.setPath('assets/room');
     ITEMS.forEach((item) => this.load.image(item.key, `${item.key}.png`));
+    this.load.setPath('assets');
+    this.load.image('room-bg', 'room-bg.png');
   }
 
   create() {
@@ -125,22 +127,11 @@ export default class GameScene extends Phaser.Scene {
   // --- room ---
 
   drawRoom(width, height) {
-    const floorY = height * 0.7;
-    const g = this.add.graphics();
-    g.fillStyle(0xead9c2); // wall
-    g.fillRect(0, 0, width, floorY);
-    g.fillStyle(0xc9a1e8, 0.35); // wallpaper stripes
-    for (let x = 60; x < width; x += 240) {
-      g.fillRect(x, 0, 26, floorY);
-    }
-    g.fillStyle(0xb98a5e); // wooden floor
-    g.fillRect(0, floorY, width, height - floorY);
-    g.fillStyle(0x9e7048, 0.6);
-    for (let y = floorY + 44; y < height; y += 48) {
-      g.fillRect(0, y, width, 4);
-    }
-    g.fillStyle(0xffffff, 0.5); // skirting board
-    g.fillRect(0, floorY - 14, width, 14);
+    const roomH = this.barTop;
+    const bg = this.add.image(width / 2, roomH / 2, 'room-bg');
+    const tex = bg.texture.getSourceImage();
+    const scale = Math.max(width / tex.width, roomH / tex.height);
+    bg.setScale(scale).setDepth(-10);
 
     this.add
       .text(width / 2, 52, 'Dress-Up Doll', {
