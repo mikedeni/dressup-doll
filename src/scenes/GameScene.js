@@ -22,18 +22,21 @@ const DOLL_SPAN = 575; // hair top to shoe bottom, in asset pixels
 const DOLL_FOOT_Y = 303; // shoe bottom offset from container origin
 const SKIN = 0xffe0b1; // sampled from head.png, used for the blink eyelids
 
-// Eye centres per face variant, in doll-container pixels (each face image
-// bakes eyes+brows+mouth together with a top-centre origin at y=-226, and
-// the variants differ in size/placement). A skin-tone eyelid is parked on
-// each eye and its scaleY flicks 0→1 to blink without touching the mouth.
-const EYES = [
-  { lx: -34, rx: 28, y: -180 },
-  { lx: -20, rx: 27, y: -178 },
-  { lx: -36, rx: 38, y: -197 },
-  { lx: -34, rx: 31, y: -193 },
+// Per face variant, in doll-container pixels (each face image bakes
+// eyes+brows+mouth together with a top-centre origin at y=-226, and the
+// variants differ in size/placement/colour). We hide the baked eyes under
+// skin patches and redraw them ourselves so the doll can glance left/right
+// and blink — neither of which the flat art can do. The mouth stays as the
+// baked art. Measured off the source PNGs (see scripts in git history).
+const FACES = [
+  { lx: -34, rx: 28, ey: -180, er: 10, ecol: 0x694c39 },
+  { lx: -20, rx: 27, ey: -178, er: 10, ecol: 0x396962 },
+  { lx: -36, rx: 38, ey: -197, er: 8, ecol: 0x4d4743 },
+  { lx: -34, rx: 31, ey: -193, er: 11, ecol: 0x4d4743 },
 ];
-const LID_W = 26;
-const LID_H = 24;
+const LID_W = 30;
+const LID_H = 26;
+const GAZE_MAX = 4; // px the eyes slide when glancing
 // The head group (head/face/hair/eyelids) lives in its own container pivoted
 // here (near the neck) so the idle can nod it around the neck rather than
 // spinning each piece about its own centre.
@@ -271,18 +274,32 @@ export default class GameScene extends Phaser.Scene {
     this.parts.head = img('head', P.head.x, P.head.y);
     this.parts.face = img('face-0', P.face.x, P.face.y).setOrigin(0.5, 0);
     this.parts.hair = img('hair-0', P.hairTop.x, P.hairTop.y).setOrigin(0.5, 0);
-    // Eyelids sit above every face part so they cover the eyes when closed.
-    // Scaled flat (scaleY 0) at rest — invisible until a blink opens them up.
-    this.parts.eyelidL = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
-    this.parts.eyelidR = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
+
+    // Live eyes, drawn on top of the flat art (positions/colours set per
+    // variant in positionFace). Skin patches hide the baked eyes; the dots
+    // are the movable eyes (look left/right); the eyelids blink. The mouth is
+    // left as the baked face art.
+    const p = this.parts;
+    p.eyeCoverL = this.add.ellipse(0, 0, 36, 32, SKIN);
+    p.eyeCoverR = this.add.ellipse(0, 0, 36, 32, SKIN);
+    p.eyeDotL = this.add.circle(0, 0, 10, 0x000000);
+    p.eyeDotR = this.add.circle(0, 0, 10, 0x000000);
+    p.eyelidL = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
+    p.eyelidR = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
+
+    this.gaze = { v: 0 }; // current horizontal eye offset
 
     // Nest the head parts into a neck-pivoted rig so it can nod as one unit.
-    const headParts = [this.parts.head, this.parts.face, this.parts.hair];
-    headParts.forEach((p) => (p.y -= NECK_PIVOT));
+    const headBody = [p.head, p.face, p.hair];
+    headBody.forEach((part) => (part.y -= NECK_PIVOT));
     this.headRig = this.add.container(0, NECK_PIVOT, [
-      ...headParts,
-      this.parts.eyelidL,
-      this.parts.eyelidR,
+      ...headBody,
+      p.eyeCoverL,
+      p.eyeCoverR,
+      p.eyeDotL,
+      p.eyeDotR,
+      p.eyelidL,
+      p.eyelidR,
     ]);
 
     this.dollScale = (height * 0.42) / DOLL_SPAN;
@@ -330,7 +347,7 @@ export default class GameScene extends Phaser.Scene {
       this.parts.hair.x = PART_OFFSETS.hairTop.x + (variant.offsetX ?? 0);
     } else if (categoryKey === 'face') {
       this.parts.face.setTexture(base);
-      this.positionEyelids(index);
+      this.positionFace(index);
     } else if (categoryKey === 'top') {
       this.parts.torso.setTexture(base);
       this.parts.armL.setTexture(`${base}-arm`);
@@ -360,13 +377,56 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  // Park the two eyelids on the current face variant's eyes (keeping their
-  // scaleY, so a blink in progress isn't reset by an outfit change).
-  positionEyelids(index) {
-    const e = EYES[index] ?? EYES[0];
-    // e.y is in doll space; eyelids live inside the neck-pivoted head rig.
-    this.parts.eyelidL.setPosition(e.lx, e.y - NECK_PIVOT);
-    this.parts.eyelidR.setPosition(e.rx, e.y - NECK_PIVOT);
+  // Lay out the live-face overlays for the current face variant. Coordinates
+  // in FACES are doll-space; the overlays live in the neck-pivoted head rig,
+  // so shift every y by -NECK_PIVOT. Keeps eyelid scaleY as-is so a blink in
+  // progress isn't reset by an outfit change.
+  positionFace(index) {
+    const f = FACES[index] ?? FACES[0];
+    const p = this.parts;
+    const ry = (y) => y - NECK_PIVOT;
+    this.faceLayout = f;
+
+    p.eyeCoverL.setPosition(f.lx, ry(f.ey));
+    p.eyeCoverR.setPosition(f.rx, ry(f.ey));
+    [p.eyeDotL, p.eyeDotR].forEach((d) => {
+      d.setRadius(f.er).setFillStyle(f.ecol);
+      d.y = ry(f.ey);
+    });
+    p.eyelidL.setPosition(f.lx, ry(f.ey));
+    p.eyelidR.setPosition(f.rx, ry(f.ey));
+
+    this.applyGaze();
+  }
+
+  // Slide both eyes to the current gaze offset (look left/right).
+  applyGaze() {
+    const f = this.faceLayout;
+    if (!f) return;
+    this.parts.eyeDotL.x = f.lx + this.gaze.v;
+    this.parts.eyeDotR.x = f.rx + this.gaze.v;
+  }
+
+  // --- expressions ---
+
+  lookAround() {
+    const dir = Phaser.Utils.Array.GetRandom([-1, -0.5, 0.5, 1, 0]);
+    this.tweens.add({
+      targets: this.gaze,
+      v: dir * GAZE_MAX,
+      duration: 260,
+      ease: 'Sine.InOut',
+      hold: Phaser.Math.Between(500, 1400),
+      yoyo: true, // glance, then return to centre
+      onUpdate: () => this.applyGaze(),
+    });
+  }
+
+  scheduleLook() {
+    this.time.delayedCall(Phaser.Math.Between(3000, 7000), () => {
+      this.lookAround();
+      this.scheduleLook();
+    });
   }
 
   // Idle life, built to read as breathing without disturbing the doll's
@@ -413,6 +473,7 @@ export default class GameScene extends Phaser.Scene {
       repeat: -1,
     });
     this.scheduleBlink();
+    this.scheduleLook();
   }
 
   scheduleBlink() {
