@@ -20,6 +20,20 @@ const PART_OFFSETS = {
 };
 const DOLL_SPAN = 575; // hair top to shoe bottom, in asset pixels
 const DOLL_FOOT_Y = 303; // shoe bottom offset from container origin
+const SKIN = 0xffe0b1; // sampled from head.png, used for the blink eyelids
+
+// Eye centres per face variant, in doll-container pixels (each face image
+// bakes eyes+brows+mouth together with a top-centre origin at y=-226, and
+// the variants differ in size/placement). A skin-tone eyelid is parked on
+// each eye and its scaleY flicks 0→1 to blink without touching the mouth.
+const EYES = [
+  { lx: -34, rx: 28, y: -180 },
+  { lx: -20, rx: 27, y: -178 },
+  { lx: -36, rx: 38, y: -197 },
+  { lx: -34, rx: 31, y: -193 },
+];
+const LID_W = 26;
+const LID_H = 24;
 
 const ITEMS = [
   { key: 'loungeSofa', name: 'Sofa' },
@@ -253,6 +267,10 @@ export default class GameScene extends Phaser.Scene {
     this.parts.head = img('head', P.head.x, P.head.y);
     this.parts.face = img('face-0', P.face.x, P.face.y).setOrigin(0.5, 0);
     this.parts.hair = img('hair-0', P.hairTop.x, P.hairTop.y).setOrigin(0.5, 0);
+    // Eyelids sit above every face part so they cover the eyes when closed.
+    // Scaled flat (scaleY 0) at rest — invisible until a blink opens them up.
+    this.parts.eyelidL = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
+    this.parts.eyelidR = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
 
     this.dollScale = (height * 0.42) / DOLL_SPAN;
     const x = save.doll ? save.doll.x * width : width * 0.22;
@@ -285,6 +303,7 @@ export default class GameScene extends Phaser.Scene {
       this.parts.hair.x = PART_OFFSETS.hairTop.x + (variant.offsetX ?? 0);
     } else if (categoryKey === 'face') {
       this.parts.face.setTexture(base);
+      this.positionEyelids(index);
     } else if (categoryKey === 'top') {
       this.parts.torso.setTexture(base);
       this.parts.armL.setTexture(`${base}-arm`);
@@ -305,41 +324,68 @@ export default class GameScene extends Phaser.Scene {
     this.valueLabels[category.key].setText(category.variants[index].name);
     this.saveState();
 
-    // Pop on scaleX only — scaleY is owned by the breathing tween.
+    // Quick springy pop on the whole doll when the outfit changes.
     this.tweens.add({
       targets: this.doll,
-      scaleX: { from: this.dollScale * 1.04, to: this.dollScale },
+      scale: { from: this.dollScale * 1.04, to: this.dollScale },
       duration: 160,
       ease: 'Back.Out',
     });
   }
 
-  // Idle life: a slow chest-breathing scaleY on the whole doll, plus an eye
-  // blink (a quick vertical squash of the face) at random intervals.
+  // Park the two eyelids on the current face variant's eyes (keeping their
+  // scaleY, so a blink in progress isn't reset by an outfit change).
+  positionEyelids(index) {
+    const e = EYES[index] ?? EYES[0];
+    this.parts.eyelidL.setPosition(e.lx, e.y);
+    this.parts.eyelidR.setPosition(e.rx, e.y);
+  }
+
+  // Idle life, built to read as breathing without disturbing the doll's
+  // saved position/scale (which drag + persistence own):
+  //   - a gentle weight-shift sway on the whole body (rotation only)
+  //   - a slow chest rise/fall on the torso alone (local scaleY)
+  //   - eyes that blink on their own eyelids at random intervals
   startIdle() {
+    this.doll.angle = -0.5;
     this.tweens.add({
       targets: this.doll,
-      scaleY: this.dollScale * 1.015,
-      duration: 2200,
+      angle: 0.5,
+      duration: 3600,
       ease: 'Sine.InOut',
       yoyo: true,
       repeat: -1,
     });
-    this.time.addEvent({
-      delay: Phaser.Math.Between(2500, 5000),
-      callback: this.blink,
-      callbackScope: this,
-      loop: true,
+    this.tweens.add({
+      targets: [this.parts.torso, this.parts.neck],
+      scaleY: 1.035,
+      duration: 2400,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+    this.scheduleBlink();
+  }
+
+  scheduleBlink() {
+    this.time.delayedCall(Phaser.Math.Between(2500, 6000), () => {
+      this.blink();
+      // ~1 in 4 blinks is a quick double blink.
+      if (Phaser.Math.Between(0, 3) === 0) {
+        this.time.delayedCall(220, () => this.blink());
+      }
+      this.scheduleBlink();
     });
   }
 
   blink() {
     this.tweens.add({
-      targets: this.parts.face,
-      scaleY: 0.1,
-      duration: 70,
+      targets: [this.parts.eyelidL, this.parts.eyelidR],
+      scaleY: { from: 0, to: 1 },
+      duration: 90,
+      hold: 40,
       yoyo: true,
-      ease: 'Quad.Out',
+      ease: 'Sine.InOut',
     });
   }
 
