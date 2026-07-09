@@ -34,6 +34,10 @@ const EYES = [
 ];
 const LID_W = 26;
 const LID_H = 24;
+// The head group (head/face/hair/eyelids) lives in its own container pivoted
+// here (near the neck) so the idle can nod it around the neck rather than
+// spinning each piece about its own centre.
+const NECK_PIVOT = -100;
 
 const ITEMS = [
   { key: 'loungeSofa', name: 'Sofa' },
@@ -272,14 +276,37 @@ export default class GameScene extends Phaser.Scene {
     this.parts.eyelidL = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
     this.parts.eyelidR = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
 
+    // Nest the head parts into a neck-pivoted rig so it can nod as one unit.
+    const headParts = [this.parts.head, this.parts.face, this.parts.hair];
+    headParts.forEach((p) => (p.y -= NECK_PIVOT));
+    this.headRig = this.add.container(0, NECK_PIVOT, [
+      ...headParts,
+      this.parts.eyelidL,
+      this.parts.eyelidR,
+    ]);
+
     this.dollScale = (height * 0.42) / DOLL_SPAN;
     const x = save.doll ? save.doll.x * width : width * 0.22;
     const y = save.doll
       ? save.doll.y * height
       : height * 0.86 - DOLL_FOOT_Y * this.dollScale;
 
+    // Body parts sit flat in the doll; the head rig rides on top (drawn last).
+    const body = [
+      this.parts.neck,
+      this.parts.armL,
+      this.parts.armR,
+      this.parts.handL,
+      this.parts.handR,
+      this.parts.legL,
+      this.parts.legR,
+      this.parts.shoeL,
+      this.parts.shoeR,
+      this.parts.hip,
+      this.parts.torso,
+    ];
     this.doll = this.add
-      .container(x, y, Object.values(this.parts))
+      .container(x, y, [...body, this.headRig])
       .setScale(this.dollScale)
       .setDepth(DEPTH.doll);
     this.doll.setInteractive(
@@ -337,29 +364,50 @@ export default class GameScene extends Phaser.Scene {
   // scaleY, so a blink in progress isn't reset by an outfit change).
   positionEyelids(index) {
     const e = EYES[index] ?? EYES[0];
-    this.parts.eyelidL.setPosition(e.lx, e.y);
-    this.parts.eyelidR.setPosition(e.rx, e.y);
+    // e.y is in doll space; eyelids live inside the neck-pivoted head rig.
+    this.parts.eyelidL.setPosition(e.lx, e.y - NECK_PIVOT);
+    this.parts.eyelidR.setPosition(e.rx, e.y - NECK_PIVOT);
   }
 
   // Idle life, built to read as breathing without disturbing the doll's
-  // saved position/scale (which drag + persistence own):
-  //   - a gentle weight-shift sway on the whole body (rotation only)
-  //   - a slow chest rise/fall on the torso alone (local scaleY)
+  // saved position/scale (which drag + persistence own). The legs/hips stay
+  // planted; only the upper body is animated, so the doll never looks like
+  // it's tipping over:
+  //   - upper body floats up/down a few px (breath), synced with...
+  //   - a chest rise/fall on the torso (local scaleY)
+  //   - a slow head nod on the neck-pivoted rig, on its own rhythm
   //   - eyes that blink on their own eyelids at random intervals
   startIdle() {
-    this.doll.angle = -0.5;
+    const upper = [
+      this.parts.torso,
+      this.parts.neck,
+      this.parts.armL,
+      this.parts.armR,
+      this.parts.handL,
+      this.parts.handR,
+      this.headRig,
+    ];
     this.tweens.add({
-      targets: this.doll,
-      angle: 0.5,
-      duration: 3600,
+      targets: upper,
+      y: '-=5',
+      duration: 2600,
       ease: 'Sine.InOut',
       yoyo: true,
       repeat: -1,
     });
     this.tweens.add({
       targets: [this.parts.torso, this.parts.neck],
-      scaleY: 1.035,
-      duration: 2400,
+      scaleY: 1.03,
+      duration: 2600,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+    this.headRig.angle = -3;
+    this.tweens.add({
+      targets: this.headRig,
+      angle: 3,
+      duration: 4200,
       ease: 'Sine.InOut',
       yoyo: true,
       repeat: -1,
