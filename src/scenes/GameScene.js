@@ -92,8 +92,9 @@ export default class GameScene extends Phaser.Scene {
       this.selection[category.key] = save.outfit?.[category.key] ?? 0;
     });
 
-    this.drawRoom(width, height);
+    this.drawRoom(width);
     this.createDoll(save);
+    this.startIdle();
     (save.furniture ?? []).forEach(({ key, x, y }) => {
       if (ITEMS.some((item) => item.key === key)) {
         this.spawnItem(key, x * width, y * height);
@@ -126,12 +127,14 @@ export default class GameScene extends Phaser.Scene {
 
   // --- room ---
 
-  drawRoom(width, height) {
+  drawRoom(width) {
     const roomH = this.barTop;
     const bg = this.add.image(width / 2, roomH / 2, 'room-bg');
     const tex = bg.texture.getSourceImage();
     const scale = Math.max(width / tex.width, roomH / tex.height);
     bg.setScale(scale).setDepth(-10);
+
+    this.createWindow(width, roomH);
 
     this.add
       .text(width / 2, 52, 'Dress-Up Doll', {
@@ -141,6 +144,83 @@ export default class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(DEPTH.uiText);
+  }
+
+  // A window on the wall showing the sky outside, tinted to match the real
+  // time of day. Refreshes on a timer so it drifts with the real clock.
+  createWindow(width, roomH) {
+    const w = width * 0.2;
+    const h = roomH * 0.32;
+    const x = width * 0.74;
+    const y = roomH * 0.34;
+
+    this.win = this.add.container(x, y).setDepth(-5);
+
+    this.winSky = this.add.rectangle(0, 0, w, h, 0x8ecae6);
+    this.winSun = this.add.circle(w * 0.26, -h * 0.24, Math.min(w, h) * 0.16, 0xffd43b);
+    this.winStars = Array.from({ length: 10 }, () =>
+      this.add
+        .circle(
+          Phaser.Math.Between(-w / 2 + 12, w / 2 - 12),
+          Phaser.Math.Between(-h / 2 + 12, h / 2 - 12),
+          2,
+          0xffffff,
+        )
+        .setDepth(1),
+    );
+    // Sill + a central mullion, so it reads as a window not a poster.
+    const frame = this.add.rectangle(0, 0, w, h).setStrokeStyle(14, 0x6d4c41);
+    const mullionV = this.add.rectangle(0, 0, 8, h, 0x6d4c41);
+    const mullionH = this.add.rectangle(0, 0, w, 8, 0x6d4c41);
+
+    this.winClock = this.add
+      .text(0, h / 2 + 26, '', {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '26px',
+        color: '#5c3a4d',
+      })
+      .setOrigin(0.5);
+
+    this.win.add([
+      this.winSky,
+      ...this.winStars,
+      this.winSun,
+      frame,
+      mullionV,
+      mullionH,
+      this.winClock,
+    ]);
+
+    this.updateWindow();
+    this.time.addEvent({
+      delay: 30000,
+      callback: this.updateWindow,
+      callbackScope: this,
+      loop: true,
+    });
+  }
+
+  // Maps a 0–23 hour to a sky look. Night raises stars + a pale moon; day a
+  // bright sun; dawn/dusk warm tones with a low sun.
+  skyForHour(hour) {
+    if (hour < 5 || hour >= 20)
+      return { sky: 0x0b1026, sun: 0xf2f0d5, sunY: -0.24, stars: true };
+    if (hour < 7) return { sky: 0xf7a072, sun: 0xffb703, sunY: 0.2, stars: false };
+    if (hour < 17) return { sky: 0x8ecae6, sun: 0xffd43b, sunY: -0.24, stars: false };
+    if (hour < 19) return { sky: 0xf4772e, sun: 0xff8600, sunY: 0.2, stars: false };
+    return { sky: 0x3a2b5e, sun: 0xffd9a0, sunY: 0.2, stars: false };
+  }
+
+  updateWindow() {
+    const now = new Date();
+    const look = this.skyForHour(now.getHours());
+    this.winSky.setFillStyle(look.sky);
+    this.winSun.setFillStyle(look.sun);
+    this.winSun.y = this.winSky.height * look.sunY;
+    this.winStars.forEach((s) => s.setVisible(look.stars));
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    this.winClock.setText(`${hh}:${mm}`);
   }
 
   spawnItem(key, x, y) {
@@ -225,11 +305,41 @@ export default class GameScene extends Phaser.Scene {
     this.valueLabels[category.key].setText(category.variants[index].name);
     this.saveState();
 
+    // Pop on scaleX only — scaleY is owned by the breathing tween.
     this.tweens.add({
       targets: this.doll,
-      scale: { from: this.dollScale * 1.04, to: this.dollScale },
+      scaleX: { from: this.dollScale * 1.04, to: this.dollScale },
       duration: 160,
       ease: 'Back.Out',
+    });
+  }
+
+  // Idle life: a slow chest-breathing scaleY on the whole doll, plus an eye
+  // blink (a quick vertical squash of the face) at random intervals.
+  startIdle() {
+    this.tweens.add({
+      targets: this.doll,
+      scaleY: this.dollScale * 1.015,
+      duration: 2200,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+    this.time.addEvent({
+      delay: Phaser.Math.Between(2500, 5000),
+      callback: this.blink,
+      callbackScope: this,
+      loop: true,
+    });
+  }
+
+  blink() {
+    this.tweens.add({
+      targets: this.parts.face,
+      scaleY: 0.1,
+      duration: 70,
+      yoyo: true,
+      ease: 'Quad.Out',
     });
   }
 
