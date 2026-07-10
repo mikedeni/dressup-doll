@@ -571,16 +571,16 @@ export default class GameScene extends Phaser.Scene {
     ];
     this.tweens.add({
       targets: upper,
-      y: '-=5',
-      duration: 2600,
+      y: '-=11',
+      duration: 2300,
       ease: 'Sine.InOut',
       yoyo: true,
       repeat: -1,
     });
     this.tweens.add({
       targets: [this.parts.torso, this.parts.neck],
-      scaleY: 1.03,
-      duration: 2600,
+      scaleY: 1.06,
+      duration: 2300,
       ease: 'Sine.InOut',
       yoyo: true,
       repeat: -1,
