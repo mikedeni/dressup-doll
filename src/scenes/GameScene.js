@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { CATEGORIES, textureKey } from './../outfits.js';
+import { FACE, drawBrow, drawNose, drawMouth } from './../face.js';
 
 // Single scene: the doll stands inside the room. Two edit modes — "Dress
 // Up" shows the outfit panel, "Room" shows the furniture inventory bar.
@@ -10,7 +11,6 @@ const PART_OFFSETS = {
   neck: { x: 0, y: -76 },
   torso: { x: 0, y: 15 },
   head: { x: 0, y: -180 },
-  face: { x: 0, y: -226 },
   hairTop: { x: 0, y: -272 },
   arm: { x: 78, y: -5 },
   hand: { x: 125, y: 70 },
@@ -22,20 +22,9 @@ const DOLL_SPAN = 575; // hair top to shoe bottom, in asset pixels
 const DOLL_FOOT_Y = 303; // shoe bottom offset from container origin
 const SKIN = 0xffe0b1; // sampled from head.png, used for the blink eyelids
 
-// Per face variant, in doll-container pixels (each face image bakes
-// eyes+brows+mouth together with a top-centre origin at y=-226, and the
-// variants differ in size/placement/colour). We hide the baked eyes under
-// skin patches and redraw them ourselves so the doll can glance left/right
-// and blink — neither of which the flat art can do. The mouth stays as the
-// baked art. Measured off the source PNGs (see scripts in git history).
-const FACES = [
-  { lx: -34, rx: 28, ey: -180, er: 10, ecol: 0x694c39 },
-  { lx: -20, rx: 27, ey: -178, er: 10, ecol: 0x396962 },
-  { lx: -36, rx: 38, ey: -197, er: 8, ecol: 0x4d4743 },
-  { lx: -34, rx: 31, ey: -193, er: 11, ecol: 0x4d4743 },
-];
-const LID_W = 30;
-const LID_H = 26;
+// The whole face is drawn procedurally on the doll's plain head skin (the
+// baked face-N.png art is no longer used) so eyebrows, eyes, nose and mouth
+// are each their own customisable category. Layout + drawing live in face.js.
 const GAZE_MAX = 4; // px the eyes slide when glancing
 // The head group (head/face/hair/eyelids) lives in its own container pivoted
 // here (near the neck) so the idle can nod it around the neck rather than
@@ -80,6 +69,7 @@ export default class GameScene extends Phaser.Scene {
       this.load.image(key, `${key}.png`);
     }
     CATEGORIES.forEach((category) => {
+      if (category.procedural) return;
       category.variants.forEach((variant, i) => {
         const base = textureKey(category.key, i);
         if (category.key === 'top') {
@@ -394,34 +384,45 @@ export default class GameScene extends Phaser.Scene {
     this.parts.hip = img('bottom-0-hip', P.hip.x, P.hip.y);
     this.parts.torso = img('top-0', P.torso.x, P.torso.y);
     this.parts.head = img('head', P.head.x, P.head.y);
-    this.parts.face = img('face-0', P.face.x, P.face.y).setOrigin(0.5, 0);
     this.parts.hair = img('hair-0', P.hairTop.x, P.hairTop.y).setOrigin(0.5, 0);
 
-    // Live eyes, drawn on top of the flat art (positions/colours set per
-    // variant in positionFace). Skin patches hide the baked eyes; the dots
-    // are the movable eyes (look left/right); the eyelids blink. The mouth is
-    // left as the baked face art.
+    // Procedural face, all drawn on the plain head skin so each feature is its
+    // own category. Graphics (brows/nose/mouth) draw in real doll-space coords
+    // but sit inside the neck-pivoted rig, so their origin is shifted by
+    // -NECK_PIVOT to cancel the rig's translation. The eye dots are the movable
+    // pupils (look left/right); the eyelids blink; the whites sit behind.
     const p = this.parts;
-    p.eyeCoverL = this.add.ellipse(0, 0, 36, 32, SKIN);
-    p.eyeCoverR = this.add.ellipse(0, 0, 36, 32, SKIN);
-    p.eyeDotL = this.add.circle(0, 0, 10, 0x000000);
-    p.eyeDotR = this.add.circle(0, 0, 10, 0x000000);
-    p.eyelidL = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
-    p.eyelidR = this.add.ellipse(0, 0, LID_W, LID_H, SKIN).setScale(1, 0);
+    const shift = { x: 0, y: -NECK_PIVOT };
+    p.browL = this.add.graphics(shift);
+    p.browR = this.add.graphics(shift);
+    p.eyeWhiteL = this.add.ellipse(0, 0, FACE.eyeW, FACE.eyeH, 0xffffff);
+    p.eyeWhiteR = this.add.ellipse(0, 0, FACE.eyeW, FACE.eyeH, 0xffffff);
+    p.eyeDotL = this.add.circle(0, 0, 9, 0x4d4743);
+    p.eyeDotR = this.add.circle(0, 0, 9, 0x4d4743);
+    p.eyelidL = this.add.ellipse(0, 0, FACE.eyeW + 4, FACE.eyeH + 4, SKIN).setScale(1, 0);
+    p.eyelidR = this.add.ellipse(0, 0, FACE.eyeW + 4, FACE.eyeH + 4, SKIN).setScale(1, 0);
+    p.nose = this.add.graphics(shift);
+    p.mouth = this.add.graphics(shift);
 
     this.gaze = { v: 0 }; // current horizontal eye offset
 
     // Nest the head parts into a neck-pivoted rig so it can nod as one unit.
-    const headBody = [p.head, p.face, p.hair];
+    // Hair drawn last so bangs can frame the face features.
+    const headBody = [p.head, p.hair];
     headBody.forEach((part) => (part.y -= NECK_PIVOT));
     this.headRig = this.add.container(0, NECK_PIVOT, [
-      ...headBody,
-      p.eyeCoverL,
-      p.eyeCoverR,
+      p.head,
+      p.browL,
+      p.browR,
+      p.eyeWhiteL,
+      p.eyeWhiteR,
       p.eyeDotL,
       p.eyeDotR,
       p.eyelidL,
       p.eyelidR,
+      p.nose,
+      p.mouth,
+      p.hair,
     ]);
 
     this.dollScale = (height * 0.42) / DOLL_SPAN;
@@ -457,6 +458,7 @@ export default class GameScene extends Phaser.Scene {
     CATEGORIES.forEach((category) => {
       this.applyVariant(category, this.selection[category.key]);
     });
+    this.positionFace();
   }
 
   applyVariant(category, index) {
@@ -467,9 +469,17 @@ export default class GameScene extends Phaser.Scene {
       this.parts.hair.setTexture(base);
       // Some hair assets are drawn off-centre; nudge per variant.
       this.parts.hair.x = PART_OFFSETS.hairTop.x + (variant.offsetX ?? 0);
-    } else if (categoryKey === 'face') {
-      this.parts.face.setTexture(base);
-      this.positionFace(index);
+    } else if (categoryKey === 'eyebrows') {
+      drawBrow(this.parts.browL, FACE.eyeLX, FACE.browY, variant);
+      drawBrow(this.parts.browR, FACE.eyeRX, FACE.browY, variant);
+    } else if (categoryKey === 'eyes') {
+      [this.parts.eyeDotL, this.parts.eyeDotR].forEach((d) =>
+        d.setRadius(variant.r ?? 9).setFillStyle(variant.color),
+      );
+    } else if (categoryKey === 'nose') {
+      drawNose(this.parts.nose, 0, FACE.noseY, variant);
+    } else if (categoryKey === 'mouth') {
+      drawMouth(this.parts.mouth, 0, FACE.mouthY, variant);
     } else if (categoryKey === 'top') {
       this.parts.torso.setTexture(base);
       this.parts.armL.setTexture(`${base}-arm`);
@@ -499,34 +509,28 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  // Lay out the live-face overlays for the current face variant. Coordinates
-  // in FACES are doll-space; the overlays live in the neck-pivoted head rig,
-  // so shift every y by -NECK_PIVOT. Keeps eyelid scaleY as-is so a blink in
-  // progress isn't reset by an outfit change.
-  positionFace(index) {
-    const f = FACES[index] ?? FACES[0];
+  // Place the eye whites, pupils and blink lids at the fixed face layout. The
+  // overlays live in the neck-pivoted head rig, so shift every y by
+  // -NECK_PIVOT. Keeps eyelid scaleY as-is so a blink in progress isn't reset.
+  positionFace() {
     const p = this.parts;
     const ry = (y) => y - NECK_PIVOT;
-    this.faceLayout = f;
+    const ey = ry(FACE.eyeY);
 
-    p.eyeCoverL.setPosition(f.lx, ry(f.ey));
-    p.eyeCoverR.setPosition(f.rx, ry(f.ey));
-    [p.eyeDotL, p.eyeDotR].forEach((d) => {
-      d.setRadius(f.er).setFillStyle(f.ecol);
-      d.y = ry(f.ey);
-    });
-    p.eyelidL.setPosition(f.lx, ry(f.ey));
-    p.eyelidR.setPosition(f.rx, ry(f.ey));
+    p.eyeWhiteL.setPosition(FACE.eyeLX, ey);
+    p.eyeWhiteR.setPosition(FACE.eyeRX, ey);
+    p.eyeDotL.y = ey;
+    p.eyeDotR.y = ey;
+    p.eyelidL.setPosition(FACE.eyeLX, ey);
+    p.eyelidR.setPosition(FACE.eyeRX, ey);
 
     this.applyGaze();
   }
 
-  // Slide both eyes to the current gaze offset (look left/right).
+  // Slide both pupils to the current gaze offset (look left/right).
   applyGaze() {
-    const f = this.faceLayout;
-    if (!f) return;
-    this.parts.eyeDotL.x = f.lx + this.gaze.v;
-    this.parts.eyeDotR.x = f.rx + this.gaze.v;
+    this.parts.eyeDotL.x = FACE.eyeLX + this.gaze.v;
+    this.parts.eyeDotR.x = FACE.eyeRX + this.gaze.v;
   }
 
   // --- expressions ---
@@ -655,8 +659,10 @@ export default class GameScene extends Phaser.Scene {
       .setStrokeStyle(3, 0xe8a7bf);
     this.dressUI.add(panelBg);
 
-    const rowStart = height * 0.2;
-    const rowGap = height * 0.125;
+    // Fit all category rows plus the randomize button inside the panel,
+    // tightening the gap as the number of categories grows.
+    const rowStart = height * 0.155;
+    const rowGap = (height * 0.71) / (CATEGORIES.length + 1);
 
     CATEGORIES.forEach((category, row) => {
       this.createSelector(category, rowStart + row * rowGap);
@@ -665,18 +671,18 @@ export default class GameScene extends Phaser.Scene {
   }
 
   createSelector(category, y) {
-    const label = this.add.text(this.panelX, y - 52, category.label, {
+    const label = this.add.text(this.panelX, y - 26, category.label, {
       fontFamily: 'Arial, sans-serif',
-      fontSize: '28px',
+      fontSize: '22px',
       color: '#8a6478',
     });
 
-    const left = this.createArrowButton(this.panelX + 32, y + 16, '<', () =>
+    const left = this.createArrowButton(this.panelX + 28, y + 14, '<', () =>
       this.cycle(category, -1),
     );
     const right = this.createArrowButton(
-      this.panelX + this.panelWidth - 32,
-      y + 16,
+      this.panelX + this.panelWidth - 28,
+      y + 14,
       '>',
       () => this.cycle(category, 1),
     );
@@ -684,11 +690,11 @@ export default class GameScene extends Phaser.Scene {
     const value = this.add
       .text(
         this.panelX + this.panelWidth / 2,
-        y + 16,
+        y + 14,
         category.variants[this.selection[category.key]].name,
         {
           fontFamily: 'Arial, sans-serif',
-          fontSize: '32px',
+          fontSize: '26px',
           color: '#3d2734',
         },
       )
@@ -700,12 +706,12 @@ export default class GameScene extends Phaser.Scene {
 
   createArrowButton(x, y, label, onClick) {
     const bg = this.add
-      .rectangle(x, y, 64, 64, 0xe8a7bf)
+      .rectangle(x, y, 50, 50, 0xe8a7bf)
       .setInteractive({ useHandCursor: true });
     const text = this.add
       .text(x, y, label, {
         fontFamily: 'Arial, sans-serif',
-        fontSize: '36px',
+        fontSize: '30px',
         color: '#ffffff',
       })
       .setOrigin(0.5);
