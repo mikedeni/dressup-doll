@@ -113,6 +113,10 @@ export default class GameScene extends Phaser.Scene {
       this.selection[category.key] = save.outfit?.[category.key] ?? 0;
     });
 
+    // Clock: 'real' follows the wall clock, 'sim' lets you scrub a set time.
+    this.clockMode = save.clockMode === 'sim' ? 'sim' : 'real';
+    this.simMin = Number.isFinite(save.simMin) ? save.simMin : 720; // noon
+
     this.drawRoom(width);
     this.createDoll(save);
     this.startIdle();
@@ -142,6 +146,8 @@ export default class GameScene extends Phaser.Scene {
       furniture,
       doll: { x: this.doll.x / width, y: this.doll.y / height },
       mode: this.mode,
+      clockMode: this.clockMode,
+      simMin: this.simMin,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }
@@ -172,7 +178,7 @@ export default class GameScene extends Phaser.Scene {
   createWindow(width, roomH) {
     const w = width * 0.2;
     const h = roomH * 0.32;
-    const x = width * 0.74;
+    const x = width * 0.62;
     const y = roomH * 0.34;
 
     this.win = this.add.container(x, y).setDepth(-5);
@@ -194,31 +200,135 @@ export default class GameScene extends Phaser.Scene {
     const mullionV = this.add.rectangle(0, 0, 8, h, 0x6d4c41);
     const mullionH = this.add.rectangle(0, 0, w, 8, 0x6d4c41);
 
-    this.winClock = this.add
-      .text(0, h / 2 + 26, '', {
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '26px',
-        color: '#5c3a4d',
-      })
-      .setOrigin(0.5);
+    this.win.add([this.winSky, ...this.winStars, this.winSun, frame, mullionV, mullionH]);
 
-    this.win.add([
-      this.winSky,
-      ...this.winStars,
-      this.winSun,
-      frame,
-      mullionV,
-      mullionH,
-      this.winClock,
-    ]);
+    // Clock lives in its own tidy card on the wall, clear of the window.
+    this.buildClock(width * 0.11, 340);
 
     this.updateWindow();
     this.time.addEvent({
-      delay: 30000,
+      delay: 15000,
       callback: this.updateWindow,
       callbackScope: this,
       loop: true,
     });
+  }
+
+  // A tidy clock card on the wall: a title bar with the (clickable) digital
+  // time, an analog dial, and a controls row. Laid out in a padded panel so
+  // nothing overlaps. In 'sim' mode −/+ scrub the time and the sky follows;
+  // in 'real' mode it tracks the wall clock.
+  buildClock(cx, cy) {
+    const R = 30;
+    const PW = 164;
+    const PH = 196;
+    this.clockUI = this.add.container(cx, cy).setDepth(DEPTH.ui);
+
+    const panel = this.add
+      .rectangle(0, 0, PW, PH, 0xfffaf0, 0.94)
+      .setStrokeStyle(4, 0x6d4c41);
+
+    // Digital readout in the header; click to type an exact HH:MM.
+    this.clockText = this.add
+      .text(0, -PH / 2 + 26, '', {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '30px',
+        color: '#5c3a4d',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.promptTime());
+
+    // Analog dial, nested so hands pivot cleanly at its own centre.
+    const dialY = -6;
+    const dial = this.add.container(0, dialY);
+    const face = this.add.circle(0, 0, R, 0xfff8e7).setStrokeStyle(4, 0x6d4c41);
+    const ticks = this.add.graphics();
+    ticks.lineStyle(3, 0x6d4c41, 1);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const sin = Math.sin(a);
+      const cos = -Math.cos(a);
+      ticks.lineBetween(sin * (R - 7), cos * (R - 7), sin * (R - 3), cos * (R - 3));
+    }
+    // Hands pivot at the centre (origin bottom) and point up at angle 0.
+    this.clockHandH = this.add.rectangle(0, 0, 5, R * 0.5, 0x3a2b2b).setOrigin(0.5, 1);
+    this.clockHandM = this.add.rectangle(0, 0, 3, R * 0.78, 0x3a2b2b).setOrigin(0.5, 1);
+    const pin = this.add.circle(0, 0, 4, 0x6d4c41);
+    dial.add([face, ticks, this.clockHandH, this.clockHandM, pin]);
+
+    const rowY = PH / 2 - 26;
+    const btn = (x, label, onClick) =>
+      this.add
+        .text(x, rowY, label, {
+          fontFamily: 'Arial, sans-serif',
+          fontSize: '15px',
+          color: '#fdf3e3',
+          backgroundColor: '#6d4c41',
+          padding: { x: 7, y: 4 },
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', onClick);
+
+    this.clockModeBtn = btn(0, '', () => this.toggleClockMode());
+    this.clockMinus = btn(-58, '−1h', () => this.stepSim(-60));
+    this.clockPlus = btn(58, '+1h', () => this.stepSim(60));
+
+    this.clockUI.add([
+      panel,
+      this.clockText,
+      dial,
+      this.clockModeBtn,
+      this.clockMinus,
+      this.clockPlus,
+    ]);
+    this.refreshClockControls();
+  }
+
+  refreshClockControls() {
+    const sim = this.clockMode === 'sim';
+    this.clockModeBtn.setText(sim ? '⏱ Custom' : '🕐 Now');
+    this.clockMinus.setVisible(sim);
+    this.clockPlus.setVisible(sim);
+  }
+
+  toggleClockMode() {
+    if (this.clockMode === 'real') {
+      // Seed the custom time from the current wall clock so it starts here.
+      const d = new Date();
+      this.simMin = d.getHours() * 60 + d.getMinutes();
+      this.clockMode = 'sim';
+    } else {
+      this.clockMode = 'real';
+    }
+    this.refreshClockControls();
+    this.updateWindow();
+    this.saveState();
+  }
+
+  stepSim(delta) {
+    this.simMin = (this.simMin + delta + 1440) % 1440;
+    this.updateWindow();
+    this.saveState();
+  }
+
+  // Type an exact time; switches to custom mode. Accepts "HH:MM" or "HH".
+  promptTime() {
+    const { h, m } = this.effectiveTime();
+    const cur = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    const input = window.prompt('Enter time (HH:MM)', cur);
+    if (input == null) return;
+    const match = input.trim().match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+    if (!match) return;
+    const hh = Math.min(23, parseInt(match[1], 10));
+    const mm = Math.min(59, parseInt(match[2] ?? '0', 10));
+    this.simMin = hh * 60 + mm;
+    this.clockMode = 'sim';
+    this.refreshClockControls();
+    this.updateWindow();
+    this.saveState();
   }
 
   // Maps a 0–23 hour to a sky look. Night raises stars + a pale moon; day a
@@ -232,16 +342,28 @@ export default class GameScene extends Phaser.Scene {
     return { sky: 0x3a2b5e, sun: 0xffd9a0, sunY: 0.2, stars: false };
   }
 
+  // The time the window + clock currently show, honouring the chosen mode.
+  effectiveTime() {
+    if (this.clockMode === 'sim') {
+      return { h: Math.floor(this.simMin / 60), m: this.simMin % 60 };
+    }
+    const d = new Date();
+    return { h: d.getHours(), m: d.getMinutes() };
+  }
+
   updateWindow() {
-    const now = new Date();
-    const look = this.skyForHour(now.getHours());
+    const { h, m } = this.effectiveTime();
+    const look = this.skyForHour(h);
     this.winSky.setFillStyle(look.sky);
     this.winSun.setFillStyle(look.sun);
     this.winSun.y = this.winSky.height * look.sunY;
     this.winStars.forEach((s) => s.setVisible(look.stars));
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    this.winClock.setText(`${hh}:${mm}`);
+    // Analog hands: minute = 6°/min, hour = 30°/hr + 0.5°/min.
+    this.clockHandM.setAngle(m * 6);
+    this.clockHandH.setAngle((h % 12) * 30 + m * 0.5);
+    this.clockText.setText(
+      `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`,
+    );
   }
 
   spawnItem(key, x, y) {
